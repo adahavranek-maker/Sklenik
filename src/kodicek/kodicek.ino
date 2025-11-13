@@ -29,7 +29,7 @@ void setup() {
   pinMode(pinReleOsvetleni, OUTPUT);
   pinMode(pinReleCerpadlo, OUTPUT);
   pinMode(pinLedCerpadlo, OUTPUT);
-  pinMode(pinFotorezistor, OUTPUT); // LED fotorezistor
+  pinMode(pinFotorezistor, INPUT); 
 
   // Inicializace TM1638
   panel.setupDisplay(HIGH, 7); // zapnutí LED indikátorů
