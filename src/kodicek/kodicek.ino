@@ -7,34 +7,32 @@ TM1638 panel(4, 3, 2); // strobe, clock, data
 // MAX7219 LED matice (32x8)
 LedControl matice = LedControl(11, 13, 10, 4); // DIN, CLK, CS, počet MAX7219 modulů
 
-// Piny relé modulů
+// Piny relé
 int pinReleOsvetleni = 7;   // relé pro LED matici
-int pinReleCerpadlo = 8;    // relé pro LED simulující čerpadlo
+int pinReleCerpadlo = 8;    // relé pro čerpadlo
 
-// Piny senzorů
-int pinVlhkostPudy = A0;    // půdní vlhkoměr
-int pinFotorezistor = A1;   // fotorezistor
+// Senzory
+int pinVlhkostPudy = A0;
+int pinFotorezistor = A1;
 
-// LED simulace
-int pinLedCerpadlo = 6;     // LED simulující čerpadlo
-int pinLedSvetlo = 5;       // LED indikující tmu
+// Jediná LED (simulace čerpadla + indikace tmy)
+int pinLed = 6;
 
-// Stav relé / LED
+// Stav relé
 int stavOsvetleni = LOW;
 int stavZavlazovani = LOW;
 
-// Předchozí stav tlačítek TM1638
+// Tlačítka
 uint8_t predchoziStavTlacitek = 0;
 
 void setup() {
   pinMode(pinReleOsvetleni, OUTPUT);
   pinMode(pinReleCerpadlo, OUTPUT);
-  pinMode(pinLedCerpadlo, OUTPUT);
-  pinMode(pinLedSvetlo, OUTPUT);
+  pinMode(pinLed, OUTPUT);
   pinMode(pinFotorezistor, INPUT);
   pinMode(pinVlhkostPudy, INPUT);
 
-  // Inicializace TM1638
+  // TM1638
   panel.setupDisplay(HIGH, 7);
 
   // Inicializace LED matice
@@ -44,11 +42,10 @@ void setup() {
     matice.clearDisplay(i);
   }
 
-  // Vypnout vše na začátku
+  // Vypnout vše
   digitalWrite(pinReleOsvetleni, LOW);
   digitalWrite(pinReleCerpadlo, LOW);
-  digitalWrite(pinLedCerpadlo, LOW);
-  digitalWrite(pinLedSvetlo, LOW);
+  digitalWrite(pinLed, LOW);
 
   Serial.begin(9600);
 }
@@ -56,11 +53,12 @@ void setup() {
 void loop() {
   uint8_t stavTlacitek = panel.getButtons();
 
-  // Tlačítko S1 → LED matice
+  // --- Tlačítko S1 → přepínání osvětlení (matice + relé) ---
   if ((stavTlacitek & 0x01) == 0x01 && (predchoziStavTlacitek & 0x01) == 0x00) {
     if (stavOsvetleni == LOW) {
       stavOsvetleni = HIGH;
       digitalWrite(pinReleOsvetleni, HIGH);
+
       for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 8; j++) {
           matice.setRow(i, j, 0xFF);
@@ -69,47 +67,46 @@ void loop() {
     } else {
       stavOsvetleni = LOW;
       digitalWrite(pinReleOsvetleni, LOW);
+
       for (int i = 0; i < 4; i++) {
         matice.clearDisplay(i);
       }
     }
   }
 
-  // Tlačítko S2 → LED simulující čerpadlo
+  // --- Tlačítko S2 → přepínání čerpadla ---
   if ((stavTlacitek & 0x02) == 0x02 && (predchoziStavTlacitek & 0x02) == 0x00) {
     if (stavZavlazovani == LOW) {
       stavZavlazovani = HIGH;
       digitalWrite(pinReleCerpadlo, HIGH);
-      digitalWrite(pinLedCerpadlo, HIGH);
     } else {
       stavZavlazovani = LOW;
       digitalWrite(pinReleCerpadlo, LOW);
-      digitalWrite(pinLedCerpadlo, LOW);
     }
   }
 
   predchoziStavTlacitek = stavTlacitek;
 
-  // --- Automatické ovládání podle senzorů ---
+  // --- Senzory ---
   int hodnotaVlhkosti = analogRead(pinVlhkostPudy);
   int hodnotaSvetla = analogRead(pinFotorezistor);
 
-  // Automatické čerpadlo při suché půdě
+  // --- Automatické čerpadlo při suché půdě ---
   if (hodnotaVlhkosti < 400) {
     digitalWrite(pinReleCerpadlo, HIGH);
-    digitalWrite(pinLedCerpadlo, HIGH);
+    stavZavlazovani = HIGH;
   } else {
     if (stavZavlazovani == LOW) {
       digitalWrite(pinReleCerpadlo, LOW);
-      digitalWrite(pinLedCerpadlo, LOW);
     }
   }
 
-  // LED indikující tmu
-  if (hodnotaSvetla < 300) {
-    digitalWrite(pinLedSvetlo, HIGH);
+  // --- JEDNA LED (čerpadlo + indikace tmy) ---
+  // LED svítí, pokud čerpadlo je zapnuté NEBO je tma
+  if (stavZavlazovani == HIGH || hodnotaSvetla < 300) {
+    digitalWrite(pinLed, HIGH);
   } else {
-    digitalWrite(pinLedSvetlo, LOW);
+    digitalWrite(pinLed, LOW);
   }
 
   // --- Serial výpis ---
