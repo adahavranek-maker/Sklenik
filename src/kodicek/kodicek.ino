@@ -1,39 +1,35 @@
 #include <TM1638.h>
 #include <LedControl.h>
 
-// TM1638 ovládací panel
-TM1638 panel(4, 3, 2); // strobe, clock, data
+// TM1638 – DATA, CLOCK, STROBE
+TM1638 panel(2, 3, 4);
 
-// MAX7219 LED matice (32x8)
-LedControl matice = LedControl(11, 13, 10, 4); // DIN, CLK, CS, počet MAX7219 modulů
+// MAX7219 LED matice
+LedControl matice = LedControl(11, 13, 10, 4);
 
-// Piny relé
-int pinReleOsvetleni = 7;   // relé pro LED matici
-int pinReleCerpadlo = 8;    // relé pro čerpadlo
+// Relé (pro budoucí čerpadlo a osvětlení)
+int pinReleOsvetleni = 7;
+int pinReleCerpadlo = 8;
 
 // Senzory
 int pinVlhkostPudy = A0;
 int pinFotorezistor = A1;
 
-// Jediná LED (simulace čerpadla + indikace tmy)
-int pinLed = 6;
+// LED simulace čerpadla
+int pinLedCerpadlo = 6;
 
-// Stav relé
+// Stavy
 int stavOsvetleni = LOW;
 int stavZavlazovani = LOW;
 
-// Tlačítka
+// Minulé tlačítka
 uint8_t predchoziStavTlacitek = 0;
 
 void setup() {
   pinMode(pinReleOsvetleni, OUTPUT);
   pinMode(pinReleCerpadlo, OUTPUT);
-  pinMode(pinLed, OUTPUT);
+  pinMode(pinLedCerpadlo, OUTPUT);
   pinMode(pinFotorezistor, INPUT);
-  pinMode(pinVlhkostPudy, INPUT);
-
-  // TM1638
-  panel.setupDisplay(HIGH, 7);
 
   // Inicializace LED matice
   for (int i = 0; i < 4; i++) {
@@ -42,10 +38,9 @@ void setup() {
     matice.clearDisplay(i);
   }
 
-  // Vypnout vše
   digitalWrite(pinReleOsvetleni, LOW);
   digitalWrite(pinReleCerpadlo, LOW);
-  digitalWrite(pinLed, LOW);
+  digitalWrite(pinLedCerpadlo, LOW);
 
   Serial.begin(9600);
 }
@@ -53,63 +48,43 @@ void setup() {
 void loop() {
   uint8_t stavTlacitek = panel.getButtons();
 
-  // --- Tlačítko S1 → přepínání osvětlení (matice + relé) ---
-  if ((stavTlacitek & 0x01) == 0x01 && (predchoziStavTlacitek & 0x01) == 0x00) {
-    if (stavOsvetleni == LOW) {
-      stavOsvetleni = HIGH;
-      digitalWrite(pinReleOsvetleni, HIGH);
+  // --- TM1638 tlačítka ---
+  // S1 – ovládání osvětlení (LED matice)
+  if ((stavTlacitek & 0x01) && !(predchoziStavTlacitek & 0x01)) {
+    stavOsvetleni = (stavOsvetleni == LOW) ? HIGH : LOW;
 
-      for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 8; j++) {
+    if (stavOsvetleni == HIGH) {
+      for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 8; j++)
           matice.setRow(i, j, 0xFF);
-        }
-      }
     } else {
-      stavOsvetleni = LOW;
-      digitalWrite(pinReleOsvetleni, LOW);
-
-      for (int i = 0; i < 4; i++) {
-        matice.clearDisplay(i);
-      }
+      for (int i = 0; i < 4; i++) matice.clearDisplay(i);
     }
   }
 
-  // --- Tlačítko S2 → přepínání čerpadla ---
-  if ((stavTlacitek & 0x02) == 0x02 && (predchoziStavTlacitek & 0x02) == 0x00) {
-    if (stavZavlazovani == LOW) {
-      stavZavlazovani = HIGH;
-      digitalWrite(pinReleCerpadlo, HIGH);
-    } else {
-      stavZavlazovani = LOW;
-      digitalWrite(pinReleCerpadlo, LOW);
-    }
+  // S2 – ruční ovládání čerpadla (LED)
+  if ((stavTlacitek & 0x02) && !(predchoziStavTlacitek & 0x02)) {
+    stavZavlazovani = (stavZavlazovani == LOW) ? HIGH : LOW;
   }
 
   predchoziStavTlacitek = stavTlacitek;
 
-  // --- Senzory ---
+  // --- Čtení senzorů ---
   int hodnotaVlhkosti = analogRead(pinVlhkostPudy);
   int hodnotaSvetla = analogRead(pinFotorezistor);
 
-  // --- Automatické čerpadlo při suché půdě ---
-  if (hodnotaVlhkosti < 400) {
-    digitalWrite(pinReleCerpadlo, HIGH);
-    stavZavlazovani = HIGH;
+  // --- LOGIKA LED ČERPADLA ---
+  // LED svítí, když je ručně zapnuta nebo pokud je půda suchá nebo tma
+  if (stavZavlazovani == HIGH || hodnotaVlhkosti < 400 || hodnotaSvetla < 300) {
+    digitalWrite(pinLedCerpadlo, HIGH);
+    // Relé připravené pro budoucí čerpadlo
+    // digitalWrite(pinReleCerpadlo, HIGH);
   } else {
-    if (stavZavlazovani == LOW) {
-      digitalWrite(pinReleCerpadlo, LOW);
-    }
+    digitalWrite(pinLedCerpadlo, LOW);
+    // digitalWrite(pinReleCerpadlo, LOW);
   }
 
-  // --- JEDNA LED (čerpadlo + indikace tmy) ---
-  // LED svítí, pokud čerpadlo je zapnuté NEBO je tma
-  if (stavZavlazovani == HIGH || hodnotaSvetla < 300) {
-    digitalWrite(pinLed, HIGH);
-  } else {
-    digitalWrite(pinLed, LOW);
-  }
-
-  // --- Serial výpis ---
+  // --- Výpis do Serial Monitoru ---
   Serial.print("Vlhkost: "); Serial.println(hodnotaVlhkosti);
   Serial.print("Svetlo: "); Serial.println(hodnotaSvetla);
   Serial.print("Osvetleni: "); Serial.println(stavOsvetleni);
