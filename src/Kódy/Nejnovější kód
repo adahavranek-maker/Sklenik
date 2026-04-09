@@ -1,0 +1,164 @@
+#include <TM1638.h> 
+#include <LedControl.h>
+#include <Servo.h>
+
+// -------------------- TM1638 --------------------
+TM1638 panel(2, 3, 4);
+
+// -------------------- LED MATICE ----------------
+LedControl matice = LedControl(11, 13, 10, 4);
+
+// -------------------- PINY ----------------------
+int pinLedCerpadlo = 6;
+int pinServo = 12;
+int pinRelais1 = 7; 
+int pinRelais2 = 8; 
+
+// -------------------- SERVO ---------------------
+Servo servoMotor;
+int stavServa = 0;   // 0 = výchozí poloha, 1 = otočeno o 30°
+
+int stavOsvetleni = 0;
+int stavZavlazovani = 0;
+int rezimZavlazovani = 0; 
+
+byte predchozi = 0;
+char posledniBluetooth = '-';
+unsigned long posledniVypis = 0;
+
+void setup() {
+  pinMode(pinLedCerpadlo, OUTPUT);
+  digitalWrite(pinLedCerpadlo, 0);
+  pinMode(pinRelais1, OUTPUT);
+  digitalWrite(pinRelais1, 0);
+  pinMode(pinRelais2, OUTPUT);
+  digitalWrite(pinRelais2, 0);
+
+  servoMotor.attach(pinServo);
+  servoMotor.writeMicroseconds(1500); 
+
+  for (int i = 0; i < 4; i++) {
+    matice.shutdown(i, 0);
+    matice.setIntensity(i, 1); 
+    matice.clearDisplay(i);
+  }
+
+  Serial.begin(9600);   
+  Serial1.begin(9600); 
+  Serial.println("--- SYSTEM START ---");
+}
+
+void loop() {
+  byte tlacitka = panel.getButtons();
+
+  // S1 - LED MATICE
+  if ((tlacitka & 0x01) && !(predchozi & 0x01)) {
+    prepniOsvetleni();
+  }
+
+  // S2 - ČERPADLO (Manual)
+  if ((tlacitka & 0x02) && !(predchozi & 0x02)) {
+    rezimZavlazovani = 1; 
+    stavZavlazovani = 1 - stavZavlazovani;
+  }
+
+  // S3 - OVLÁDÁNÍ SERVA
+  if ((tlacitka & 0x04) && !(predchozi & 0x04)) {
+    ovladaniServa();
+  }
+
+  // S4 - PŘEPÍNÁNÍ REŽIMU
+  if ((tlacitka & 0x08) && !(predchozi & 0x08)) {
+    rezimZavlazovani = 1 - rezimZavlazovani;
+  }
+
+  predchozi = tlacitka;
+
+  // --- LOGIKA ČERPADLA ---
+  int hodnotaVlhkost = analogRead(A0);
+  int hodnotaSvetlo  = analogRead(A1);
+  int stavCerpadla = 0;
+
+  if (rezimZavlazovani == 0) {
+    if (hodnotaVlhkost > 400 || hodnotaSvetlo > 300) stavCerpadla = 1;
+    else stavCerpadla = 0;
+    stavZavlazovani = stavCerpadla; 
+  } else {
+    stavCerpadla = stavZavlazovani; 
+  }
+
+  digitalWrite(pinLedCerpadlo, stavCerpadla);
+  digitalWrite(pinRelais2, stavCerpadla);
+
+  // --- BLUETOOTH ---
+  if (Serial1.available() > 0) {
+    char znak = Serial1.read();
+    posledniBluetooth = znak;
+
+    if (znak == '1') { if (stavOsvetleni == 0) prepniOsvetleni(); }
+    else if (znak == '2') { if (stavOsvetleni == 1) prepniOsvetleni(); }
+    else if (znak == '3') { rezimZavlazovani = 1; stavZavlazovani = 1; }
+    else if (znak == '4') { rezimZavlazovani = 1; stavZavlazovani = 0; }
+    else if (znak == '5' || znak == '6') { ovladaniServa(); }
+  }
+
+  // --- SERIAL MONITOR (ROZŠÍŘENÝ VÝPIS) ---
+  if (millis() - posledniVypis > 1500) { // Vypisujeme každých 1.5 sekundy
+    Serial.println("");
+    Serial.println("======= MONITOR STAVU =======");
+    
+    // Senzory
+    Serial.print("Vlhkomer (A0): "); Serial.println(hodnotaVlhkost);
+    Serial.print("Fotorezistor (A1): "); Serial.println(hodnotaSvetlo);
+    
+    // Režim
+    Serial.print("Rezim zavlazovani: "); Serial.println(rezimZavlazovani == 0 ? "AUTOMATIKA" : "MANUAL");
+    
+    // Akční členy - Relé a LED
+    Serial.print("Relé 1 (Matice): "); Serial.println(digitalRead(pinRelais1) == HIGH ? "ZAPNUTO" : "VYPNUTO");
+    Serial.print("Relé 2 (Cerpadlo): "); Serial.println(digitalRead(pinRelais2) == HIGH ? "ZAPNUTO" : "VYPNUTO");
+    Serial.print("Stav LED cerpadla: "); Serial.println(digitalRead(pinLedCerpadlo) == HIGH ? "SVITI" : "NESVITI");
+    
+    // LED Matice
+    Serial.print("LED Matice: "); Serial.println(stavOsvetleni == 1 ? "AKTIVNI (MAX JAS)" : "VYPNUTA");
+    
+    // Servo
+    Serial.print("Poloha serva: "); Serial.println(stavServa == 0 ? "VYCHOZI (ZAVRENO)" : "OTOCENO (30st)");
+    
+    // Bluetooth
+    Serial.print("Posledni BT prikaz: "); Serial.println(posledniBluetooth);
+    
+    Serial.println("=============================");
+    posledniVypis = millis();
+  }
+
+  delay(50);
+}
+
+void prepniOsvetleni() {
+  stavOsvetleni = 1 - stavOsvetleni;
+  if (stavOsvetleni == 1) {
+    for (int i = 0; i < 4; i++) for (int j = 0; j < 8; j++) matice.setRow(i, j, 0xFF);
+    digitalWrite(pinRelais1, 1);
+  } else {
+    for (int i = 0; i < 4; i++) matice.clearDisplay(i);
+    digitalWrite(pinRelais1, 0);
+  }
+}
+
+void ovladaniServa() {
+  if (stavServa == 0) {
+    Serial.println(">> Akce: Otacim TAM (+30st)");
+    servoMotor.writeMicroseconds(1650); 
+    delay(500);
+    servoMotor.writeMicroseconds(1500); 
+    stavServa = 1;
+  } 
+  else {
+    Serial.println(">> Akce: Otacim ZPATKY (-30st)");
+    servoMotor.writeMicroseconds(1350); 
+    delay(500);
+    servoMotor.writeMicroseconds(1500); 
+    stavServa = 0;
+  }
+}
